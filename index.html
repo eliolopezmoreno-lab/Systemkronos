@@ -1,0 +1,2249 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>KRONOS SYSTEM PORT</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      body {
+        background-color: #000;
+        overflow: hidden;
+        width: 100vw;
+        height: 100vh;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+      // =============================================================================
+      // 1. INICIALIZACIÓN Y CONFIGURACIÓN DE PANTALLA
+      // =============================================================================
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+
+      let ANCHO = window.innerWidth;
+      let ALTO = window.innerHeight;
+      canvas.width = ANCHO;
+      canvas.height = ALTO;
+
+      window.addEventListener("resize", () => {
+        ANCHO = window.innerWidth;
+        ALTO = window.innerHeight;
+        canvas.width = ANCHO;
+        canvas.height = ALTO;
+        tam_base = Math.min(ANCHO, ALTO);
+        actualizarRectangulos();
+      });
+
+      // --- PALETA DE COLORES ---
+      const AZUL_FONDO = "rgb(10, 20, 35)";
+      const CIAN_TERMINAL = "rgb(0, 200, 230)";
+      const CIAN_NEON = "rgb(160, 255, 255)";
+      const VERDE_ALERTA = "rgb(180, 255, 120)";
+      const AMARILLO_WARN = "rgb(255, 230, 100)";
+      const ORO_RECOMPENSA = "rgb(255, 215, 0)";
+      const ROJO_ALERTA = "rgb(255, 10, 25)";
+      const NEGRO_MONITOR = "rgb(5, 8, 14)";
+      const BLANCO = "rgb(255, 255, 255)";
+      const GRIS_MURO = "rgb(40, 50, 65)";
+      const VIRUS_COLOR = "rgb(140, 20, 255)";
+      const LETRAS = ["A) ", "B) ", "C) ", "D) ", "E) ", "F) "];
+
+      // =============================================================================
+      // 2. GENERADOR DE AUDIO NATIVO WEB (WEB AUDIO API)
+      // =============================================================================
+      let audioCtx = null;
+      let audio_on = true;
+
+      function initAudio() {
+        if (!audioCtx)
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      function playSound(tipo) {
+        if (!audio_on || !audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        let dur = 0.1;
+        let t = audioCtx.currentTime;
+
+        if (tipo === "click") {
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(600, t);
+          dur = 0.1;
+          gain.gain.setValueAtTime(0.5, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "tecleo") {
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(950, t);
+          dur = 0.05;
+          gain.gain.setValueAtTime(0.2, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "impacto") {
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(45, t);
+          dur = 0.5;
+          gain.gain.setValueAtTime(0.8, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "exito") {
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(850, t);
+          dur = 0.2;
+          osc.frequency.linearRampToValueAtTime(1200, t + dur);
+          gain.gain.setValueAtTime(0.5, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "laser") {
+          osc.type = "square";
+          osc.frequency.setValueAtTime(1200, t);
+          dur = 0.4;
+          osc.frequency.exponentialRampToValueAtTime(100, t + dur);
+          gain.gain.setValueAtTime(0.3, t);
+          gain.gain.exponentialRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "error") {
+          osc.type = "sawtooth";
+          osc.frequency.setValueAtTime(120, t);
+          dur = 0.6;
+          osc.frequency.linearRampToValueAtTime(80, t + dur);
+          gain.gain.setValueAtTime(0.6, t);
+          gain.gain.linearRampToValueAtTime(0.01, t + dur);
+        } else if (tipo === "sirena" || tipo === "pirotecnia") {
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(400, t);
+          dur = 1.0;
+          osc.frequency.linearRampToValueAtTime(600, t + 0.5);
+          osc.frequency.linearRampToValueAtTime(400, t + 1.0);
+          gain.gain.setValueAtTime(0.4, t);
+          gain.gain.linearRampToValueAtTime(0.01, t + dur);
+        }
+        osc.start(t);
+        osc.stop(t + dur);
+      }
+
+      // =============================================================================
+      // 3. BANCO DE DATOS INTEGRADO
+      // =============================================================================
+      const TIPOS_FUNC = [
+        "LINEAL",
+        "CONSTANTE",
+        "SENO",
+        "COSENO",
+        "EXPONENCIAL",
+        "VALOR ABSOLUTO",
+      ];
+
+      const POOL_FASE1 = [
+        { e: "f(x) = 3x - 4", t: "LINEAL" },
+        { e: "f(x) = -2x + 8", t: "LINEAL" },
+        { e: "f(x) = 12", t: "CONSTANTE" },
+        { e: "f(x) = -5", t: "CONSTANTE" },
+        { e: "f(x) = sen(x)", t: "SENO" },
+        { e: "f(x) = cos(x)", t: "COSENO" },
+        { e: "f(x) = |x|", t: "VALOR ABSOLUTO" },
+      ];
+
+      const SECUENCIA_LINEAL_F2 = [
+        {
+          l1: "FILTRO 1: En la ley de signos,",
+          l2: "¿menos por menos (- x -) que resultado da?",
+          opcA: "POSITIVO (+)",
+          opcB: "NEGATIVO (-)",
+          correcta: "A",
+          f_l1: "Multiplicar dos valores negativos",
+          f_l2: "siempre resulta en un valor positivo (+).",
+        },
+        {
+          l1: "FILTRO 2: Si en f(x) = ax + b la 'a' es negativa,",
+          l2: "¿la trayectoria de la recta crece o decrece?",
+          opcA: "LA RECTA DECRECE",
+          opcB: "LA RECTA CRECE",
+          correcta: "A",
+          f_l1: "Al ser la pendiente menor a cero (a < 0),",
+          f_l2: "la recta decae de izquierda a derecha.",
+        },
+        {
+          l1: "FILTRO 3: Si en f(x) = ax + b la 'a' es positiva,",
+          l2: "¿el comportamiento de la recta crece o decrece?",
+          opcA: "LA RECTA DECRECE",
+          opcB: "LA RECTA CRECE",
+          correcta: "B",
+          f_l1: "Una pendiente mayor a cero (a > 0) genera",
+          f_l2: "un crecimiento continuo en la funcion.",
+        },
+      ];
+
+      const PREGUNTAS_RETO = [
+        {
+          l1: "SISTEMA: Analice la trayectoria del proyectil",
+          l2: "¿Que modelo representa?",
+          opciones: [
+            "LINEAL RECTA",
+            "CUADRATICA (PARABOLA)",
+            "VALOR ABSOLUTO",
+            "COSENOIDAL",
+            "CONSTANTE",
+            "EXPONENCIAL",
+          ],
+          correcta: 1,
+          f_l1: "EL VECTOR DE CAIDA ES UNA TRIDIMENSION CUADRATICA.",
+          f_l2: "Lanzar objetos con gravedad genera una PARABOLA.",
+        },
+        {
+          l1: "SISTEMA: Si el vertice es de 17 m y el piso 8m,",
+          l2: "¿que distancia separa la altura maxima del piso?",
+          opciones: ["7 m", "8 m", "5 m", "9 m", "12 m", "15 m"],
+          correcta: 3,
+          f_l1: "DISTANCIA = VERTICE - ALTURA DEL MURO (17m - 8m).",
+          f_l2: "La separacion neta es de 9 metros.",
+        },
+        {
+          l1: "SISTEMA: Si su modelo es f(x) = -x^2 + 6x + 8,",
+          l2: "¿a que distancia cae la pelota al suelo?",
+          opciones: [
+            "4.15 m",
+            "5.00 m",
+            "10.24 m",
+            "8.00 m",
+            "7.12 m",
+            "6.38 m",
+          ],
+          correcta: 4,
+          f_l1: "CORTE CON EJE X: f(x) = 0 -> APLICAR FORMULA GENERAL.",
+          f_l2: "La raiz positiva de la ecuacion es aprox 7.12 m.",
+        },
+      ];
+
+      const POOL_BOSS_COMBATE = [
+        {
+          l1: "IMPACTO 1: EL VIRUS SALTA AL CUADRANTE I.",
+          l2: "¿QUE SIGNOS TIENE DICHO CUADRANTE?",
+          opciones: ["(+,+)", "(-,+)", "(-,-)", "(+,-)"],
+          correcta_idx: 0,
+        },
+        {
+          l1: "IMPACTO 2: EL VIRUS SALTA AL CUADRANTE II.",
+          l2: "¿QUE SIGNOS TIENE DICHO CUADRANTE?",
+          opciones: ["(+,+)", "(-,+)", "(-,-)", "(+,-)"],
+          correcta_idx: 1,
+        },
+        {
+          l1: "GOLPE FINAL: EL VIRUS SALTA AL CUADRANTE III.",
+          l2: "¿QUE SIGNOS TIENE DICHO CUADRANTE?",
+          opciones: ["(+,+)", "(-,+)", "(-,-)", "(+,-)"],
+          correcta_idx: 2,
+        },
+      ];
+
+      function generar_banco_flash() {
+        return [
+          {
+            t: "SIGNOS",
+            q: "Mas por menos da como resultado menos.",
+            a: true,
+            exp: "Signos diferentes multiplicados siempre dan negativo.",
+          },
+          {
+            t: "SIGNOS",
+            q: "Menos por menos da como resultado menos.",
+            a: false,
+            exp: "Menos por menos siempre da un valor POSITIVO.",
+          },
+          {
+            t: "LINEAL",
+            q: "La recta f(x) = 3x - 2 es una funcion creciente.",
+            a: true,
+            exp: "La pendiente (3) es positiva, por lo tanto crece hacia arriba.",
+          },
+          {
+            t: "LINEAL",
+            q: "La recta f(x) = -5x + 4 es decreciente.",
+            a: true,
+            exp: "La pendiente (-5) es negativa, por lo que decae.",
+          },
+          {
+            t: "CUADRATICA",
+            q: "En f(x) = x^2, la parabola abre hacia abajo.",
+            a: false,
+            exp: "El coeficiente de x^2 es positivo, la parabola abre hacia ARRIBA.",
+          },
+          {
+            t: "LOG",
+            q: "El logaritmo natural de 1, ln(1), es igual a 0.",
+            a: true,
+            exp: "Todo logaritmo de 1, sin importar la base, siempre es 0.",
+          },
+          {
+            t: "ABS",
+            q: "El valor absoluto de |-15| es -15.",
+            a: false,
+            exp: "El valor absoluto indica distancia, siempre es positivo (15).",
+          },
+          {
+            t: "DOMINIO",
+            q: "El dominio de f(x) = raiz(2x+1) empieza en -0.5",
+            a: true,
+            exp: "2x+1 debe ser >= 0. Al despejar queda x >= -0.5.",
+          },
+          {
+            t: "DOMINIO",
+            q: "La raiz cuadrada de un numero negativo es un numero real.",
+            a: false,
+            exp: "Las raices pares de numeros negativos no existen en los Reales.",
+          },
+          {
+            t: "CUADRATICA",
+            q: "La parabola f(x) = -2x^2 abre hacia abajo.",
+            a: true,
+            exp: "El negativo al inicio invierte la parabola hacia abajo.",
+          },
+          {
+            t: "LOG",
+            q: "Se puede calcular el logaritmo natural de un numero negativo.",
+            a: false,
+            exp: "El argumento de un logaritmo debe ser estrictamente mayor a 0.",
+          },
+          {
+            t: "CONSTANTE",
+            q: "En f(x) = 4, la pendiente es 0.",
+            a: true,
+            exp: "Es una linea horizontal continua, no tiene inclinacion.",
+          },
+          {
+            t: "FRACCION",
+            q: "La division por cero (ej. 5 / 0) da como resultado 0.",
+            a: false,
+            exp: "La division por cero esta matematicamente indeterminada.",
+          },
+          {
+            t: "CUADRATICA",
+            q: "El vertice de f(x) = x^2 esta en el origen (0,0).",
+            a: true,
+            exp: "No tiene desplazamientos, su punto mas bajo es exactamente (0,0).",
+          },
+          {
+            t: "ABS",
+            q: "La funcion valor absoluto tiene forma de 'V'.",
+            a: true,
+            exp: "Se grafica con lineas rectas que rebotan en el vertice formando una V.",
+          },
+          {
+            t: "DOMINIO",
+            q: "El dominio de f(x) = 1/x son todos los Reales sin excepcion.",
+            a: false,
+            exp: "Debe excluirse el 0, ya que 1/0 no esta definido.",
+          },
+          {
+            t: "LINEAL",
+            q: "Una funcion lineal puede curvarse si la pendiente es grande.",
+            a: false,
+            exp: "Una funcion lineal SIEMPRE grafica una linea recta perfecta.",
+          },
+          {
+            t: "RAIZ",
+            q: "La raiz cuadrada de 25 solo puede ser 5 positivo.",
+            a: false,
+            exp: "Puede ser 5 o -5, ya que (-5)^2 tambien es 25.",
+          },
+          {
+            t: "POTENCIA",
+            q: "Cualquier numero elevado a la potencia cero da 1.",
+            a: true,
+            exp: "Por propiedad de exponentes, todo numero (excepto 0) a la 0 es 1.",
+          },
+          {
+            t: "ABS",
+            q: "|5| y |-5| dan resultados diferentes.",
+            a: false,
+            exp: "Ambos dan 5, ya que representan la distancia al cero en la recta.",
+          },
+        ];
+      }
+      const POOL_FLASH_COMPLETO = generar_banco_flash();
+
+      const SPRITE_VIRUS = [
+        [0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0],
+        [0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0],
+        [0, 1, 1, 1, 2, 2, 1, 2, 2, 1, 1, 1, 0],
+        [1, 1, 1, 1, 2, 2, 1, 2, 2, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+        [0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0],
+        [0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0],
+      ];
+
+      // =============================================================================
+      // 4. VARIABLES DE CONTROL
+      // =============================================================================
+      let juego_estado = "INTRO";
+      let pagina_instrucciones = 0;
+      let fase_actual = 1,
+        intentos = 3,
+        escudos_guardados_f2 = 3;
+      let indice_reto = 0,
+        retos_partida = [],
+        opciones_actuales = [];
+      let feedback_f1_e = "",
+        feedback_f1_t = "";
+      let pregunta_fase2_actual = {},
+        indice_reto_f2 = 0,
+        sub_indice_reto_challenge = 0;
+      let progreso_matrix_f2 = 0,
+        ticks_matrix_f2 = 0,
+        feedback_f2_l1 = "",
+        feedback_f2_l2 = "";
+      let indice_pregunta_boss = 0,
+        pregunta_boss_actual = {},
+        torretas_boss = [];
+      let t_fisica_reto = 0.0,
+        progreso_particulas_reto = [],
+        t_inicio_colapso = 0,
+        explosiones_boss = [],
+        fuegos_artificiales = [],
+        ultimo_fuego_artificial = 0;
+      let flash_desbloqueado = false,
+        preguntas_flash_partida = [],
+        indice_flash_actual = 0,
+        correctas_flash = 0;
+      let tiempo_flash_restante = 120.0,
+        tiempo_flash_usado = 0.0,
+        t_ultimo_frame_flash = 0;
+      let mostrar_explicacion_flash = false,
+        texto_explicacion_flash = "",
+        tiempo_error_infinito = 0;
+
+      let texto_intro = [
+        "SISTEMA KRONOS: ACCESO NIVEL 4",
+        "------------------------------",
+        "BIENVENIDO AL COMPLEJO MATEMATICO.",
+        "DETECTANDO HACKEO EXTERNO...",
+        "ERROR EN NODO CENTRAL.",
+        "RESUELVA PARA RECUPERAR CONTROL.",
+      ];
+      let caracteres = 0,
+        linea_actual = 0,
+        ultimo_tecleo = 0,
+        progreso_descifrado = 0,
+        ticks_descifrado = 0;
+      let pos_puerta_izq = -(ANCHO / 2),
+        pos_puerta_der = ANCHO,
+        humo = [],
+        scanline_y = 0;
+      let vibracion_offset_x = 0,
+        vibracion_offset_y = 0,
+        tiempo_destello_error = 0,
+        tiempo_emergencia = 0,
+        progreso_trazado_grafica = 0.0,
+        t_hit = 0;
+
+      let lluvia_matrix = Array.from({ length: 30 }, () => ({
+        x: Math.random() * ANCHO,
+        y: Math.random() * -ALTO,
+        v: 3 + Math.random() * 4,
+      }));
+      let rects = {};
+
+      function actualizarRectangulos() {
+        rects.continuar = { x: ANCHO / 2 - 145, y: ALTO * 0.84, w: 290, h: 55 };
+        rects.opcA = {
+          x: ANCHO * 0.11,
+          y: ALTO * 0.64,
+          w: ANCHO * 0.36,
+          h: 65,
+        };
+        rects.opcB = {
+          x: ANCHO * 0.53,
+          y: ALTO * 0.64,
+          w: ANCHO * 0.36,
+          h: 65,
+        };
+        rects.flash_v = {
+          x: ANCHO * 0.15,
+          y: ALTO * 0.65,
+          w: ANCHO * 0.3,
+          h: 75,
+        };
+        rects.flash_f = {
+          x: ANCHO * 0.55,
+          y: ALTO * 0.65,
+          w: ANCHO * 0.3,
+          h: 75,
+        };
+
+        rects.f1_opciones = [
+          { x: ANCHO * 0.1, y: ALTO * 0.68, w: ANCHO * 0.38, h: 55 },
+          { x: ANCHO * 0.52, y: ALTO * 0.68, w: ANCHO * 0.38, h: 55 },
+          { x: ANCHO * 0.1, y: ALTO * 0.77, w: ANCHO * 0.38, h: 55 },
+          { x: ANCHO * 0.52, y: ALTO * 0.77, w: ANCHO * 0.38, h: 55 },
+        ];
+
+        rects.reto_6 = [];
+        for (let f = 0; f < 3; f++) {
+          for (let c = 0; c < 2; c++) {
+            rects.reto_6.push({
+              x: c === 0 ? ANCHO * 0.11 : ANCHO * 0.53,
+              y: ALTO * 0.67 + f * 64,
+              w: ANCHO * 0.36,
+              h: 52,
+            });
+          }
+        }
+      }
+      actualizarRectangulos();
+
+      // =============================================================================
+      // 5. FUNCIONES DE PREPARACIÓN
+      // =============================================================================
+      function shuffle(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+      }
+
+      function preparar_fase1() {
+        fase_actual = 1;
+        intentos = 3;
+        indice_reto = 0;
+        progreso_descifrado = 0;
+        retos_partida = shuffle([...POOL_FASE1]).slice(0, 4);
+        configurar_opciones_f1(retos_partida[0].t);
+      }
+      function configurar_opciones_f1(correcta) {
+        let falsas = shuffle(TIPOS_FUNC.filter((t) => t !== correcta));
+        opciones_actuales = shuffle([correcta, ...falsas.slice(0, 3)]);
+      }
+      function preparar_fase2() {
+        fase_actual = 2;
+        progreso_matrix_f2 = 0;
+        if (indice_reto_f2 < SECUENCIA_LINEAL_F2.length)
+          pregunta_fase2_actual = SECUENCIA_LINEAL_F2[indice_reto_f2];
+      }
+      function preparar_combate_boss() {
+        pregunta_boss_actual = POOL_BOSS_COMBATE[indice_pregunta_boss];
+        progreso_descifrado = 0;
+        torretas_boss = [];
+        let ancho_t = ANCHO * 0.2;
+        let espacio = (ANCHO - ancho_t * 4) / 5;
+        pregunta_boss_actual.opciones.forEach((op, i) => {
+          torretas_boss.push({
+            rect: {
+              x: espacio + i * (ancho_t + espacio),
+              y: ALTO * 0.8,
+              w: ancho_t,
+              h: 60,
+            },
+            texto: op,
+            es_correcta: i === pregunta_boss_actual.correcta_idx,
+          });
+        });
+      }
+      function preparar_preguntas_flash() {
+        indice_flash_actual = 0;
+        correctas_flash = 0;
+        tiempo_flash_restante = 120.0;
+        tiempo_flash_usado = 0.0;
+        mostrar_explicacion_flash = false;
+        texto_explicacion_flash = "";
+        t_ultimo_frame_flash = performance.now();
+        preguntas_flash_partida = shuffle([...POOL_FLASH_COMPLETO]).slice(
+          0,
+          20
+        );
+      }
+      preparar_fase1();
+
+      // =============================================================================
+      // 6. UTILIDADES GRÁFICAS
+      // =============================================================================
+      function ctxRect(r, fill, stroke, r_rad = 0, lw = 2) {
+        ctx.beginPath();
+        ctx.roundRect(r.x, r.y, r.w, r.h, r_rad);
+        if (fill) {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
+        if (stroke) {
+          ctx.lineWidth = lw;
+          ctx.strokeStyle = stroke;
+          ctx.stroke();
+        }
+      }
+
+      function drawTextBorde(txt, x, y, font_s, col1, col2) {
+        ctx.font = `bold ${font_s}px 'Courier New'`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = col2;
+        [-2, 0, 2].forEach((ox) =>
+          [-2, 0, 2].forEach((oy) => {
+            if (ox !== 0 || oy !== 0) ctx.fillText(txt, x + ox, y + oy);
+          })
+        );
+        ctx.fillStyle = col1;
+        ctx.fillText(txt, x, y);
+      }
+
+      function drawText(txt, x, y, font_s, color, align = "center") {
+        ctx.font = `bold ${font_s}px 'Courier New'`;
+        ctx.fillStyle = color;
+        ctx.textAlign = align;
+        ctx.textBaseline = "middle";
+        ctx.fillText(txt, x, y);
+      }
+
+      function col(px, py, rect) {
+        return (
+          px >= rect.x &&
+          px <= rect.x + rect.w &&
+          py >= rect.y &&
+          py <= rect.y + rect.h
+        );
+      }
+
+      // =============================================================================
+      // 7. INPUT (TACTIL/MOUSE) Y LÓGICA DE ESTADOS
+      // =============================================================================
+      let clickEvt = null;
+      let sig_estado_puertas = "JUEGO";
+
+      window.addEventListener("pointerdown", (e) => {
+        initAudio();
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        clickEvt = {
+          x: (e.clientX - rect.left) * scaleX,
+          y: (e.clientY - rect.top) * scaleY,
+        };
+      });
+
+      function loop(timestamp) {
+        requestAnimationFrame(loop);
+        let t = timestamp;
+        let tam_base = Math.min(ANCHO, ALTO);
+        let f_l = tam_base * 0.035,
+          f_m = tam_base * 0.025,
+          f_s = tam_base * 0.02;
+
+        vibracion_offset_x = 0;
+        vibracion_offset_y = 0;
+
+        // Lógica del temporizador Flash (Solo descuenta si no estamos mostrando una explicación)
+        if (juego_estado === "FLASH_CORE") {
+          let dt = (t - t_ultimo_frame_flash) / 1000.0;
+          if (!mostrar_explicacion_flash) {
+            tiempo_flash_restante = Math.max(0, tiempo_flash_restante - dt);
+            tiempo_flash_usado += dt;
+            if (tiempo_flash_restante === 0) juego_estado = "FLASH_RESULTADO";
+          }
+        }
+        t_ultimo_frame_flash = t;
+
+        // --- PROCESAMIENTO DE CLICS ---
+        if (clickEvt) {
+          let ev = clickEvt;
+          if (juego_estado === "INTRO") {
+            if (linea_actual < texto_intro.length) {
+              linea_actual = texto_intro.length;
+              caracteres = 0;
+              playSound("click");
+            } else if (col(ev.x, ev.y, rects.continuar)) {
+              playSound("click");
+              juego_estado = "MENU";
+            }
+          } else if (juego_estado === "MENU") {
+            for (let i = 0; i < 3; i++) {
+              if (
+                col(ev.x, ev.y, {
+                  x: ANCHO / 2 - 150,
+                  y: ALTO * 0.38 + i * 70,
+                  w: 300,
+                  h: 50,
+                })
+              ) {
+                playSound("click");
+                if (i === 0) {
+                  preparar_fase1();
+                  sig_estado_puertas = "JUEGO";
+                  juego_estado = "CERRANDO";
+                }
+                if (i === 1) {
+                  juego_estado = "INSTRUCCIONES";
+                  pagina_instrucciones = 0;
+                }
+                if (i === 2) {
+                  audio_on = !audio_on;
+                }
+              }
+            }
+            if (
+              flash_desbloqueado &&
+              col(ev.x, ev.y, {
+                x: ANCHO / 2 - 175,
+                y: ALTO * 0.38 + 3 * 70,
+                w: 350,
+                h: 55,
+              })
+            ) {
+              playSound("click");
+              preparar_preguntas_flash();
+              sig_estado_puertas = "FLASH_CORE";
+              juego_estado = "CERRANDO";
+            }
+          } else if (juego_estado === "INSTRUCCIONES") {
+            let btn_volver = {
+              x: ANCHO / 2 - 220,
+              y: ALTO * 0.88,
+              w: 200,
+              h: 40,
+            };
+            let btn_sig = { x: ANCHO / 2 + 20, y: ALTO * 0.88, w: 200, h: 40 };
+            if (col(ev.x, ev.y, btn_volver)) {
+              playSound("click");
+              if (pagina_instrucciones === 1) pagina_instrucciones = 0;
+              else juego_estado = "MENU";
+            }
+            if (pagina_instrucciones === 0 && col(ev.x, ev.y, btn_sig)) {
+              playSound("click");
+              pagina_instrucciones = 1;
+            }
+          } else if (juego_estado === "JUEGO") {
+            rects.f1_opciones.forEach((r, i) => {
+              if (
+                col(ev.x, ev.y, {
+                  x: r.x + vibracion_offset_x,
+                  y: r.y + vibracion_offset_y,
+                  w: r.w,
+                  h: r.h,
+                })
+              ) {
+                if (opciones_actuales[i] === retos_partida[indice_reto].t) {
+                  playSound("exito");
+                  indice_reto++;
+                  progreso_descifrado = 0;
+                  if (indice_reto === 3) {
+                    juego_estado = "PLUS_POPUP";
+                    tiempo_emergencia = t;
+                    playSound("sirena");
+                  } else configurar_opciones_f1(retos_partida[indice_reto].t);
+                } else {
+                  playSound("error");
+                  tiempo_destello_error = t;
+                  intentos--;
+                  feedback_f1_e = retos_partida[indice_reto].e;
+                  feedback_f1_t = retos_partida[indice_reto].t;
+                  juego_estado = "FASE1_EXPLICACION";
+                }
+              }
+            });
+          } else if (juego_estado === "FASE1_EXPLICACION") {
+            playSound("click");
+            if (intentos <= 0) {
+              sig_estado_puertas = "GAME_OVER";
+              juego_estado = "CERRANDO";
+            } else {
+              let nf =
+                POOL_FASE1[Math.floor(Math.random() * POOL_FASE1.length)];
+              retos_partida[indice_reto] = nf;
+              configurar_opciones_f1(nf.t);
+              progreso_descifrado = 0;
+              juego_estado = "JUEGO";
+            }
+          } else if (juego_estado === "PLUS_JUEGO") {
+            rects.f1_opciones.forEach((r, i) => {
+              if (col(ev.x, ev.y, r)) {
+                if (opciones_actuales[i] === retos_partida[3].t) {
+                  playSound("exito");
+                  intentos++;
+                  escudos_guardados_f2 = intentos;
+                  juego_estado = "PLUS_RECOMPENSA";
+                } else {
+                  playSound("error");
+                  tiempo_destello_error = t;
+                  escudos_guardados_f2 = intentos;
+                  indice_reto_f2 = 0;
+                  preparar_fase2();
+                  sig_estado_puertas = "FASE2_Filtro";
+                  juego_estado = "CERRANDO";
+                }
+              }
+            });
+          } else if (
+            juego_estado === "PLUS_RECOMPENSA" &&
+            col(ev.x, ev.y, {
+              x: ANCHO / 2 - 160,
+              y: ALTO * 0.75,
+              w: 320,
+              h: 55,
+            })
+          ) {
+            playSound("click");
+            indice_reto_f2 = 0;
+            preparar_fase2();
+            sig_estado_puertas = "FASE2_Filtro";
+            juego_estado = "CERRANDO";
+          } else if (juego_estado === "FASE2_Filtro") {
+            if (col(ev.x, ev.y, rects.opcA)) checkFase2("A", t);
+            if (col(ev.x, ev.y, rects.opcB)) checkFase2("B", t);
+          } else if (juego_estado === "RETO_CHALLENGE") {
+            rects.reto_6.forEach((r, i) => {
+              if (col(ev.x, ev.y, r)) {
+                if (i === PREGUNTAS_RETO[sub_indice_reto_challenge].correcta) {
+                  playSound("exito");
+                  sub_indice_reto_challenge++;
+                  progreso_matrix_f2 = 0;
+                  if (sub_indice_reto_challenge > 2)
+                    juego_estado = "FASE2_RECOMPENSA";
+                } else {
+                  playSound("error");
+                  tiempo_destello_error = t;
+                  intentos--;
+                  feedback_f2_l1 =
+                    PREGUNTAS_RETO[sub_indice_reto_challenge].f_l1;
+                  feedback_f2_l2 =
+                    PREGUNTAS_RETO[sub_indice_reto_challenge].f_l2;
+                  juego_estado = "FASE2_EXPLICACION";
+                }
+              }
+            });
+          } else if (juego_estado === "FASE2_EXPLICACION") {
+            playSound("click");
+            if (intentos <= 0) {
+              sig_estado_puertas = "GAME_OVER";
+              juego_estado = "CERRANDO";
+            } else {
+              progreso_matrix_f2 = 0;
+              juego_estado =
+                indice_reto_f2 >= 3 ? "RETO_CHALLENGE" : "FASE2_Filtro";
+            }
+          } else if (
+            juego_estado === "FASE2_RECOMPENSA" &&
+            col(ev.x, ev.y, {
+              x: ANCHO / 2 - 160,
+              y: ALTO * 0.75,
+              w: 320,
+              h: 55,
+            })
+          ) {
+            playSound("click");
+            sig_estado_puertas = "FASE3_INTRO";
+            juego_estado = "CERRANDO";
+            tiempo_emergencia = t;
+          } else if (juego_estado === "FASE3_COMBATE") {
+            torretas_boss.forEach((torre) => {
+              if (col(ev.x, ev.y, torre.rect)) {
+                if (torre.es_correcta) {
+                  playSound("laser");
+                  playSound("impacto");
+                  tiempo_destello_error = t;
+                  indice_pregunta_boss++;
+                  if (indice_pregunta_boss >= 3) {
+                    juego_estado = "BOSS_COLAPSO";
+                    t_inicio_colapso = t;
+                    explosiones_boss = [];
+                  } else preparar_combate_boss();
+                } else {
+                  playSound("error");
+                  tiempo_destello_error = t;
+                  intentos--;
+                  if (intentos <= 0) {
+                    sig_estado_puertas = "GAME_OVER";
+                    juego_estado = "CERRANDO";
+                  } else preparar_combate_boss();
+                }
+              }
+            });
+          } else if (juego_estado === "FLASH_CORE") {
+            if (mostrar_explicacion_flash) {
+              if (
+                col(ev.x, ev.y, {
+                  x: ANCHO / 2 - 340,
+                  y: ALTO / 2 - 130,
+                  w: 680,
+                  h: 260,
+                })
+              ) {
+                playSound("click");
+                mostrar_explicacion_flash = false;
+                checkFlashNext();
+              }
+            } else {
+              let ans = null;
+              if (col(ev.x, ev.y, rects.flash_v)) ans = true;
+              else if (col(ev.x, ev.y, rects.flash_f)) ans = false;
+
+              if (ans !== null) {
+                if (ans === preguntas_flash_partida[indice_flash_actual].a) {
+                  playSound("exito");
+                  correctas_flash++;
+                  checkFlashNext();
+                } else {
+                  playSound("error");
+                  tiempo_destello_error = t;
+                  mostrar_explicacion_flash = true;
+                  texto_explicacion_flash =
+                    preguntas_flash_partida[indice_flash_actual].exp;
+                }
+              }
+            }
+          } else if (
+            juego_estado === "FLASH_RESULTADO" ||
+            juego_estado === "VICTORIA_TOTAL"
+          ) {
+            let ry =
+              juego_estado === "FLASH_RESULTADO" ? ALTO * 0.78 : ALTO / 2 + 110;
+            if (col(ev.x, ev.y, { x: ANCHO / 2 - 250, y: ry, w: 230, h: 55 })) {
+              playSound("click");
+              sig_estado_puertas = "MENU";
+              juego_estado = "CERRANDO";
+            }
+            if (col(ev.x, ev.y, { x: ANCHO / 2 + 20, y: ry, w: 230, h: 55 })) {
+              playSound("click");
+              preparar_preguntas_flash();
+              sig_estado_puertas = "FLASH_CORE";
+              juego_estado = "CERRANDO";
+            }
+          } else if (juego_estado === "GAME_OVER") {
+            if (
+              col(ev.x, ev.y, {
+                x: ANCHO / 2 - 145,
+                y: ALTO * 0.7,
+                w: 290,
+                h: 55,
+              })
+            ) {
+              playSound("click");
+              if (fase_actual === 1) {
+                preparar_fase1();
+                sig_estado_puertas = "JUEGO";
+              } else if (fase_actual === 2) {
+                intentos = escudos_guardados_f2;
+                indice_reto_f2 = 0;
+                preparar_fase2();
+                sig_estado_puertas = "FASE2_Filtro";
+              } else {
+                indice_pregunta_boss = 0;
+                intentos = escudos_guardados_f2;
+                preparar_combate_boss();
+                sig_estado_puertas = "FASE3_COMBATE";
+              }
+              juego_estado = "CERRANDO";
+            }
+            if (
+              col(ev.x, ev.y, {
+                x: ANCHO / 2 - 145,
+                y: ALTO * 0.82,
+                w: 290,
+                h: 55,
+              })
+            ) {
+              playSound("click");
+              location.reload();
+            }
+          }
+          clickEvt = null;
+        }
+
+        // --- LOGICA ANIMACIONES ---
+        if (t - tiempo_destello_error < 280) {
+          vibracion_offset_x = (Math.random() - 0.5) * 30;
+          vibracion_offset_y = (Math.random() - 0.5) * 30;
+        } else if (
+          juego_estado === "FASE3_INTRO" &&
+          t - tiempo_emergencia < 1400
+        ) {
+          vibracion_offset_x = (Math.random() - 0.5) * 20;
+          vibracion_offset_y = (Math.random() - 0.5) * 20;
+        } else if (juego_estado === "BOSS_COLAPSO") {
+          vibracion_offset_x = (Math.random() - 0.5) * 40;
+          if (t - t_inicio_colapso < 3500) {
+            if (Math.random() < 0.25) {
+              playSound("impacto");
+              explosiones_boss.push({
+                x: ANCHO / 2 + (Math.random() - 0.5) * 220,
+                y: ALTO * 0.32 + (Math.random() - 0.5) * 120,
+                r: 10 + Math.random() * 25,
+                c: [BLANCO, AMARILLO_WARN, ROJO_ALERTA][
+                  Math.floor(Math.random() * 3)
+                ],
+              });
+            }
+          } else {
+            sig_estado_puertas = "VICTORIA_TOTAL";
+            juego_estado = "CERRANDO";
+            flash_desbloqueado = true;
+            t_hit = t;
+          }
+        }
+
+        if (juego_estado === "CERRANDO") {
+          pos_puerta_izq += 25;
+          pos_puerta_der -= 25;
+          if (pos_puerta_izq >= 0) {
+            pos_puerta_izq = 0;
+            pos_puerta_der = ANCHO / 2;
+            playSound("impacto");
+            for (let i = 0; i < 40; i++)
+              humo.push({
+                x: ANCHO / 2,
+                y: 100 + Math.random() * (ALTO - 200),
+                vx: (Math.random() - 0.5) * 12,
+                vy: (Math.random() - 0.5) * 3,
+                r: 15 + Math.random() * 15,
+              });
+            juego_estado =
+              sig_estado_puertas === "VICTORIA_TOTAL"
+                ? "SISTEMA_REORGANIZANDO"
+                : "IMPACTO";
+            t_hit = t;
+          }
+        } else if (juego_estado === "SISTEMA_REORGANIZANDO") {
+          if (t - t_hit > 4000) {
+            juego_estado = "ABRIENDO";
+            fuegos_artificiales = [];
+            ultimo_fuego_artificial = t;
+          }
+        } else if (juego_estado === "IMPACTO") {
+          if (t - t_hit > 700) juego_estado = "ABRIENDO";
+        } else if (juego_estado === "ABRIENDO") {
+          pos_puerta_izq -= 35;
+          pos_puerta_der += 35;
+          if (pos_puerta_izq <= -ANCHO / 2) juego_estado = sig_estado_puertas;
+        } else if (
+          juego_estado === "PLUS_POPUP" ||
+          juego_estado === "RETO_POPUP"
+        ) {
+          vibracion_offset_x = (Math.random() - 0.5) * 10;
+          if (t - tiempo_emergencia > 2500) {
+            if (juego_estado === "PLUS_POPUP") {
+              juego_estado = "PLUS_JUEGO";
+              progreso_trazado_grafica = 0;
+              configurar_opciones_f1(retos_partida[3].t);
+            } else {
+              juego_estado = "RETO_CHALLENGE";
+              t_fisica_reto = 0;
+              progreso_particulas_reto = [];
+            }
+          }
+        } else if (juego_estado === "VICTORIA_TOTAL") {
+          if (t - ultimo_fuego_artificial > 450) {
+            ultimo_fuego_artificial = t;
+            playSound("pirotecnia");
+            let cx = ANCHO * 0.15 + Math.random() * (ANCHO * 0.7);
+            let cy = ALTO * 0.12 + Math.random() * (ALTO * 0.38);
+            for (let a = 0; a < 360; a += 45)
+              fuegos_artificiales.push({
+                x: cx,
+                y: cy,
+                vx: Math.cos((a * Math.PI) / 180) * 6,
+                vy: Math.sin((a * Math.PI) / 180) * 6,
+                v: 25,
+                c: [
+                  ROJO_ALERTA,
+                  VERDE_ALERTA,
+                  AMARILLO_WARN,
+                  CIAN_NEON,
+                  ORO_RECOMPENSA,
+                ][Math.floor(Math.random() * 5)],
+              });
+          }
+        } else if (juego_estado === "FASE3_INTRO") {
+          if (t - tiempo_emergencia > 4000) {
+            playSound("click");
+            fase_actual = 3;
+            preparar_combate_boss();
+            sig_estado_puertas = "FASE3_COMBATE";
+            juego_estado = "CERRANDO";
+          }
+        }
+
+        // --- RENDERIZADO VISUAL ---
+        ctx.fillStyle = AZUL_FONDO;
+        ctx.fillRect(0, 0, ANCHO, ALTO);
+        ctx.fillStyle = "rgb(0,45,55)";
+        lluvia_matrix.forEach((m) => {
+          m.y += m.v;
+          if (m.y > ALTO) {
+            m.y = -100;
+            m.x = Math.random() * ANCHO;
+          }
+          ctx.fillRect(m.x, m.y, 2, 12);
+        });
+        ctxRect(
+          { x: ANCHO * 0.04, y: ALTO * 0.04, w: ANCHO * 0.92, h: ALTO * 0.92 },
+          NEGRO_MONITOR,
+          "rgb(15, 45, 65)",
+          15,
+          6
+        );
+
+        ctx.save();
+        ctx.translate(vibracion_offset_x, vibracion_offset_y);
+
+        if (juego_estado === "INTRO") {
+          if (linea_actual < texto_intro.length && t - ultimo_tecleo > 25) {
+            caracteres++;
+            ultimo_tecleo = t;
+            playSound("tecleo");
+            if (caracteres > texto_intro[linea_actual].length) {
+              caracteres = 0;
+              linea_actual++;
+            }
+          }
+          for (let i = 0; i <= linea_actual; i++) {
+            if (i >= texto_intro.length) break;
+            drawText(
+              texto_intro[i].substring(
+                0,
+                i === linea_actual ? caracteres : texto_intro[i].length
+              ),
+              ANCHO / 2,
+              ALTO * 0.24 + i * 42,
+              f_m,
+              CIAN_NEON
+            );
+          }
+          if (linea_actual >= texto_intro.length) {
+            ctxRect(rects.continuar, null, CIAN_TERMINAL, 6);
+            drawText(
+              "CONTINUAR",
+              rects.continuar.x + rects.continuar.w / 2,
+              rects.continuar.y + rects.continuar.h / 2,
+              f_m,
+              CIAN_TERMINAL
+            );
+          }
+        } else if (juego_estado === "MENU") {
+          drawText(
+            "KRONOS SYSTEM",
+            ANCHO / 2,
+            ALTO * 0.2,
+            f_l * 1.5,
+            CIAN_NEON
+          );
+          [
+            "INICIAR OPERACION",
+            "INSTRUCCIONES",
+            `AUDIO: ${audio_on ? "ON" : "OFF"}`,
+          ].forEach((txt, i) => {
+            let r = {
+              x: ANCHO / 2 - 150,
+              y: ALTO * 0.38 + i * 70,
+              w: 300,
+              h: 50,
+            };
+            ctxRect(r, "rgb(40,80,100)", null, 6);
+            drawText(txt, r.x + 150, r.y + 25, f_m, CIAN_NEON);
+          });
+          if (flash_desbloqueado) {
+            let r = {
+              x: ANCHO / 2 - 175,
+              y: ALTO * 0.38 + 3 * 70,
+              w: 350,
+              h: 55,
+            };
+            let lw = 3 + Math.sin(t * 0.01) * 2;
+            let c = Math.floor(t / 150) % 2 === 0 ? ORO_RECOMPENSA : CIAN_NEON;
+            ctxRect(r, "rgb(50,10,30)", c, 8, lw);
+            drawText(
+              "MODO FLASH [DESBLOQUEADO]",
+              r.x + 175,
+              r.y + 27,
+              f_m,
+              ORO_RECOMPENSA
+            );
+          }
+        } else if (juego_estado === "INSTRUCCIONES") {
+          drawTextBorde(
+            "MANUAL DEL SISTEMA",
+            ANCHO / 2,
+            ALTO * 0.1,
+            f_l,
+            ORO_RECOMPENSA,
+            NEGRO_MONITOR
+          );
+          let rx = ANCHO * 0.1,
+            ry = ALTO * 0.2,
+            rw = ANCHO * 0.8;
+          let cy = ry;
+
+          function drawSection(title, body) {
+            drawText(title, ANCHO / 2, cy, f_m, CIAN_TERMINAL);
+            cy += f_m * 1.5;
+            let words = body.split(" "),
+              line = "";
+            ctx.font = `bold ${f_s}px 'Courier New'`;
+            ctx.fillStyle = BLANCO;
+            ctx.textAlign = "center";
+            for (let n = 0; n < words.length; n++) {
+              let testLine = line + words[n] + " ",
+                m = ctx.measureText(testLine);
+              if (m.width > rw && n > 0) {
+                ctx.fillText(line.trim(), ANCHO / 2, cy);
+                line = words[n] + " ";
+                cy += f_s * 1.5;
+              } else {
+                line = testLine;
+              }
+            }
+            ctx.fillText(line.trim(), ANCHO / 2, cy);
+            cy += f_s * 2.5;
+          }
+
+          if (pagina_instrucciones === 0) {
+            // LORE ACTUALIZADO
+            drawSection(
+              "LORE DEL SISTEMA:",
+              "KRONOS es un complejo y vital sistema matematico que actualmente esta siendo atacado y vulnerado. La unica forma de erradicar esta amenaza es destruyendo el nucleo del virus central, pero para llegar a el deberas superar distintas pruebas de las que hablaremos a continuacion. Nombrado en honor al Titan del tiempo, este servidor procesa datos a velocidades inimaginables y ahora depende de ti para purgar la infeccion."
+            );
+            drawSection(
+              "FASE 1 - IDENTIFICACION:",
+              "El sistema mostrara una expresion matematica. Debes analizar la ecuacion y seleccionar el boton (A, B, C o D) con la clasificacion de funcion correcta para reparar los nodos."
+            );
+          } else {
+            drawSection(
+              "FASE 2 - FILTROS Y RETO:",
+              "Supera los filtros teoricos resolviendo preguntas basicas. Luego, analiza detalladamente la grafica y la trayectoria de un proyectil en pantalla para resolver el modelo cuadratico."
+            );
+            drawSection(
+              "FASE 3 - COMBATE DE CUADRANTES:",
+              "El Jefe Virus saltara a distintos cuadrantes del plano cartesiano. Para atacarlo, debes seleccionar el boton (A, B, C o D) que contenga el par de signos (+,-) correspondiente al cuadrante donde se ubico."
+            );
+            drawSection(
+              "MODO FLASH (OCULTO):",
+              "Desbloqueable al finalizar. Tienes 120 SEGUNDOS para responder la mayor cantidad de preguntas con los botones de VERDADERO o FALSO. El tiempo penaliza."
+            );
+          }
+
+          let btn_volver = {
+            x: ANCHO / 2 - 220,
+            y: ALTO * 0.88,
+            w: 200,
+            h: 40,
+          };
+          let btn_sig = { x: ANCHO / 2 + 20, y: ALTO * 0.88, w: 200, h: 40 };
+          ctxRect(btn_volver, "rgb(30,50,70)", CIAN_TERMINAL, 6);
+          drawText(
+            pagina_instrucciones === 0 ? "VOLVER" : "ANTERIOR",
+            btn_volver.x + 100,
+            btn_volver.y + 20,
+            f_s,
+            CIAN_NEON
+          );
+          if (pagina_instrucciones === 0) {
+            ctxRect(btn_sig, "rgb(30,50,70)", CIAN_TERMINAL, 6);
+            drawText(
+              "SIGUIENTE",
+              btn_sig.x + 100,
+              btn_sig.y + 20,
+              f_s,
+              CIAN_NEON
+            );
+          }
+        } else if (juego_estado === "JUEGO") {
+          drawTextBorde(
+            "Selecciona la opcion correcta:",
+            ANCHO / 2,
+            ALTO * 0.09,
+            f_m,
+            CIAN_NEON,
+            NEGRO_MONITOR
+          );
+          drawTextBorde(
+            "¿Que funcion representa el modelo mostrado?",
+            ANCHO / 2,
+            ALTO * 0.14,
+            f_m,
+            VERDE_ALERTA,
+            NEGRO_MONITOR
+          );
+          drawText(
+            `RETOS: ${indice_reto}/3  |  ESCUDOS: ${intentos}`,
+            ANCHO / 2,
+            ALTO * 0.2,
+            f_s,
+            CIAN_NEON
+          );
+
+          let r_d = {
+            x: ANCHO * 0.12,
+            y: ALTO * 0.26,
+            w: ANCHO * 0.76,
+            h: ALTO * 0.36,
+          };
+          ctxRect(r_d, NEGRO_MONITOR, CIAN_TERMINAL, 8);
+
+          let eq = retos_partida[indice_reto].e;
+          if (progreso_descifrado < eq.length && t - ticks_descifrado > 40) {
+            progreso_descifrado++;
+            ticks_descifrado = t;
+            playSound("tecleo");
+          }
+          let txt_d = "";
+          const rchars = ["@", "#", "$", "%"];
+          for (let i = 0; i < eq.length; i++)
+            txt_d +=
+              i < progreso_descifrado
+                ? eq[i]
+                : rchars[Math.floor(Math.random() * rchars.length)];
+          drawText(txt_d, r_d.x + r_d.w / 2, r_d.y + r_d.h / 2, f_l, CIAN_NEON);
+
+          rects.f1_opciones.forEach((r, i) => {
+            ctxRect(r, "rgb(25,55,75)", CIAN_TERMINAL, 6);
+            drawText(
+              LETRAS[i] + opciones_actuales[i],
+              r.x + r.w / 2,
+              r.y + r.h / 2,
+              f_s,
+              CIAN_NEON
+            );
+          });
+        } else if (
+          juego_estado === "FASE1_EXPLICACION" ||
+          juego_estado === "FASE2_EXPLICACION"
+        ) {
+          let r_e = {
+            x: ANCHO * 0.08,
+            y: ALTO * 0.25,
+            w: ANCHO * 0.84,
+            h: ALTO * 0.5,
+          };
+          ctxRect(r_e, "rgb(35,10,15)", ROJO_ALERTA, 12, 3);
+          drawTextBorde(
+            "ERROR EN PROTOCOLO",
+            r_e.x + r_e.w / 2,
+            r_e.y + 40,
+            f_l,
+            ROJO_ALERTA,
+            BLANCO
+          );
+          if (juego_estado === "FASE1_EXPLICACION") {
+            drawText(
+              `Funcion mostrada: ${feedback_f1_e}`,
+              r_e.x + r_e.w / 2,
+              r_e.y + 140,
+              f_m,
+              BLANCO
+            );
+            drawText(
+              `Correcta: ${feedback_f1_t}`,
+              r_e.x + r_e.w / 2,
+              r_e.y + 185,
+              f_m,
+              VERDE_ALERTA
+            );
+          } else {
+            drawText(
+              feedback_f2_l1,
+              r_e.x + r_e.w / 2,
+              r_e.y + 140,
+              f_m,
+              BLANCO
+            );
+            drawText(
+              feedback_f2_l2,
+              r_e.x + r_e.w / 2,
+              r_e.y + 185,
+              f_m,
+              BLANCO
+            );
+          }
+          drawText(
+            "Haz clic para continuar...",
+            r_e.x + r_e.w / 2,
+            r_e.y + r_e.h - 40,
+            f_m,
+            CIAN_NEON
+          );
+        } else if (
+          juego_estado === "PLUS_POPUP" ||
+          juego_estado === "RETO_POPUP"
+        ) {
+          let r_p = { x: ANCHO / 2 - 280, y: ALTO / 2 - 120, w: 560, h: 240 };
+          let isPlus = juego_estado === "PLUS_POPUP";
+          ctxRect(
+            r_p,
+            isPlus ? "rgb(45,10,15)" : "rgb(10,45,50)",
+            isPlus ? ROJO_ALERTA : CIAN_NEON,
+            10,
+            4
+          );
+          drawTextBorde(
+            isPlus ? "AMENAZA DETECTADA" : "RETO CHALLENGE",
+            r_p.x + 280,
+            r_p.y + 45,
+            f_l,
+            isPlus ? ROJO_ALERTA : CIAN_TERMINAL,
+            BLANCO
+          );
+          drawText(
+            isPlus ? "INYECCION DE GRAFICA PLUS" : "RETO KINETICO DE ALTA VEL",
+            r_p.x + 280,
+            r_p.y + 120,
+            f_m,
+            BLANCO
+          );
+        } else if (juego_estado === "PLUS_JUEGO") {
+          drawTextBorde(
+            "¿A que funcion pertenece esta grafica?",
+            ANCHO / 2,
+            ALTO * 0.13,
+            f_m,
+            ROJO_ALERTA,
+            BLANCO
+          );
+          dibujar_grafica({
+            x: ANCHO / 2 - 180,
+            y: ALTO * 0.22,
+            w: 360,
+            h: ALTO * 0.4,
+          });
+          rects.f1_opciones.forEach((r, i) => {
+            ctxRect(r, "rgb(25,55,75)", ROJO_ALERTA, 6);
+            drawText(
+              LETRAS[i] + opciones_actuales[i],
+              r.x + r.w / 2,
+              r.y + r.h / 2,
+              f_s,
+              CIAN_NEON
+            );
+          });
+        } else if (juego_estado === "PLUS_RECOMPENSA") {
+          let r_r = {
+            x: ANCHO * 0.1,
+            y: ALTO * 0.25,
+            w: ANCHO * 0.8,
+            h: ALTO * 0.45,
+          };
+          ctxRect(
+            r_r,
+            NEGRO_MONITOR,
+            Math.floor(t / 150) % 2 === 0 ? ORO_RECOMPENSA : BLANCO,
+            15,
+            3 + Math.sin(t * 0.01) * 2
+          );
+          drawTextBorde(
+            "¡SISTEMA OPTIMIZADO!",
+            r_r.x + r_r.w / 2,
+            r_r.y + 60,
+            f_l,
+            ORO_RECOMPENSA,
+            NEGRO_MONITOR
+          );
+          drawTextBorde(
+            `ESCUDOS: ${intentos} (+1)`,
+            r_r.x + r_r.w / 2,
+            r_r.y + 150,
+            f_m,
+            VERDE_ALERTA,
+            NEGRO_MONITOR
+          );
+          ctxRect(
+            { x: ANCHO / 2 - 160, y: ALTO * 0.75, w: 320, h: 55 },
+            null,
+            CIAN_TERMINAL,
+            8
+          );
+          drawText(
+            "CONTINUAR A FASE 2",
+            ANCHO / 2,
+            ALTO * 0.75 + 27,
+            f_m,
+            CIAN_NEON
+          );
+        } else if (juego_estado === "FASE2_Filtro") {
+          drawTextBorde(
+            "FASE 2: CONTRACONTROL",
+            ANCHO / 2,
+            ALTO * 0.09,
+            f_l,
+            CIAN_NEON,
+            NEGRO_MONITOR
+          );
+          drawText(
+            `RETOS: ${indice_reto_f2}/3  |  ESCUDOS: ${intentos}`,
+            ANCHO / 2,
+            ALTO * 0.17,
+            f_s,
+            AMARILLO_WARN
+          );
+          let rq = {
+            x: ANCHO * 0.1,
+            y: ALTO * 0.25,
+            w: ANCHO * 0.8,
+            h: ALTO * 0.26,
+          };
+          ctxRect(rq, NEGRO_MONITOR, CIAN_TERMINAL, 8);
+
+          let l1 = pregunta_fase2_actual.l1,
+            l2 = pregunta_fase2_actual.l2;
+          let tl = l1.length + l2.length;
+          if (progreso_matrix_f2 < tl && t - ticks_matrix_f2 > 5) {
+            progreso_matrix_f2 += 3;
+            ticks_matrix_f2 = t;
+            playSound("tecleo");
+          }
+          drawText(
+            scrambled(l1, progreso_matrix_f2),
+            rq.x + rq.w / 2,
+            rq.y + rq.h / 2 - 25,
+            f_m,
+            BLANCO
+          );
+          drawText(
+            scrambled(l2, Math.max(0, progreso_matrix_f2 - l1.length)),
+            rq.x + rq.w / 2,
+            rq.y + rq.h / 2 + 20,
+            f_m,
+            BLANCO
+          );
+
+          [rects.opcA, rects.opcB].forEach((r, i) => {
+            ctxRect(r, "rgb(25,55,75)", CIAN_TERMINAL, 6);
+            drawText(
+              LETRAS[i] +
+                (i === 0
+                  ? pregunta_fase2_actual.opcA
+                  : pregunta_fase2_actual.opcB),
+              r.x + r.w / 2,
+              r.y + r.h / 2,
+              f_s,
+              CIAN_NEON
+            );
+          });
+        } else if (juego_estado === "RETO_CHALLENGE") {
+          let cp = PREGUNTAS_RETO[sub_indice_reto_challenge];
+          drawTextBorde(
+            `RETO CHALLENGE (${sub_indice_reto_challenge + 1}/3)`,
+            ANCHO / 2,
+            ALTO * 0.07,
+            f_l,
+            ROJO_ALERTA,
+            BLANCO
+          );
+          dibujar_fisicas({
+            x: ANCHO * 0.12,
+            y: ALTO * 0.21,
+            w: ANCHO * 0.76,
+            h: ALTO * 0.34,
+          });
+
+          let tl = cp.l1.length + cp.l2.length;
+          if (progreso_matrix_f2 < tl && t - ticks_matrix_f2 > 5) {
+            progreso_matrix_f2 += 3;
+            ticks_matrix_f2 = t;
+            playSound("tecleo");
+          }
+          drawText(
+            scrambled(cp.l1, progreso_matrix_f2),
+            ANCHO / 2,
+            ALTO * 0.57,
+            f_s,
+            AMARILLO_WARN
+          );
+          drawText(
+            scrambled(cp.l2, Math.max(0, progreso_matrix_f2 - cp.l1.length)),
+            ANCHO / 2,
+            ALTO * 0.61,
+            f_s,
+            AMARILLO_WARN
+          );
+          rects.reto_6.forEach((r, i) => {
+            ctxRect(r, "rgb(20,40,65)", CIAN_TERMINAL, 6);
+            drawText(
+              LETRAS[i] + cp.opciones[i],
+              r.x + r.w / 2,
+              r.y + r.h / 2,
+              f_s,
+              CIAN_NEON
+            );
+          });
+        } else if (juego_estado === "FASE2_RECOMPENSA") {
+          let r_w = { x: ANCHO / 2 - 300, y: ALTO / 2 - 150, w: 600, h: 300 };
+          ctxRect(r_w, NEGRO_MONITOR, ORO_RECOMPENSA, 12, 3);
+          drawTextBorde(
+            "¡FASE 2 COMPLETADA!",
+            r_w.x + 300,
+            r_w.y + 45,
+            f_m,
+            ORO_RECOMPENSA,
+            NEGRO_MONITOR
+          );
+          drawText(
+            "Localizado el Core del Virus.",
+            r_w.x + 300,
+            r_w.y + 110,
+            f_s,
+            BLANCO
+          );
+          drawText(
+            "Protocolo: 4 Torretas Online.",
+            r_w.x + 300,
+            r_w.y + 150,
+            f_s,
+            VERDE_ALERTA
+          );
+          ctxRect(
+            { x: ANCHO / 2 - 160, y: ALTO * 0.75, w: 320, h: 55 },
+            null,
+            CIAN_TERMINAL,
+            8
+          );
+          drawText(
+            "INICIAR COMBATE FINAL",
+            ANCHO / 2,
+            ALTO * 0.75 + 27,
+            f_m,
+            CIAN_NEON
+          );
+        } else if (juego_estado === "FASE3_INTRO") {
+          drawTextBorde(
+            "FASE 3: ELIMINACION",
+            ANCHO / 2,
+            ALTO * 0.08,
+            f_l,
+            ROJO_ALERTA,
+            BLANCO
+          );
+          dibujar_virus(
+            ANCHO / 2,
+            ALTO * 0.42,
+            18,
+            t - tiempo_emergencia < 1400
+          );
+        } else if (
+          juego_estado === "FASE3_COMBATE" ||
+          juego_estado === "BOSS_COLAPSO"
+        ) {
+          drawTextBorde(
+            "COMBATE FINAL DE CUADRANTES",
+            ANCHO / 2,
+            ALTO * 0.06,
+            f_l,
+            ROJO_ALERTA,
+            NEGRO_MONITOR
+          );
+          drawText(
+            `VIDA: ${Math.max(
+              0,
+              3 - indice_pregunta_boss
+            )}/3 | ESCUDOS: ${intentos}`,
+            ANCHO / 2,
+            ALTO * 0.12,
+            f_s,
+            CIAN_NEON
+          );
+          if (juego_estado === "FASE3_COMBATE") {
+            dibujar_virus(
+              ANCHO / 2,
+              ALTO * 0.32,
+              15,
+              t - tiempo_destello_error < 250
+            );
+            let r_eq = {
+              x: ANCHO * 0.1,
+              y: ALTO * 0.5,
+              w: ANCHO * 0.8,
+              h: 140,
+            };
+            ctxRect(r_eq, NEGRO_MONITOR, CIAN_TERMINAL, 10);
+
+            let l1 = pregunta_boss_actual.l1,
+              l2 = pregunta_boss_actual.l2;
+            let tl = l1.length + l2.length;
+            if (progreso_descifrado < tl && t - ticks_descifrado > 30) {
+              progreso_descifrado += 2;
+              ticks_descifrado = t;
+              playSound("tecleo");
+            }
+            drawText(
+              scrambled(l1, progreso_descifrado, "XY+-1234567890"),
+              r_eq.x + r_eq.w / 2,
+              r_eq.y + 45,
+              f_m,
+              CIAN_NEON
+            );
+            drawText(
+              scrambled(
+                l2,
+                Math.max(0, progreso_descifrado - l1.length),
+                "XY+-1234567890"
+              ),
+              r_eq.x + r_eq.w / 2,
+              r_eq.y + 95,
+              f_m,
+              BLANCO
+            );
+
+            torretas_boss.forEach((torre, i) => {
+              ctxRect(torre.rect, "rgb(20,40,65)", CIAN_TERMINAL, 8);
+              drawText(
+                LETRAS[i] + torre.texto,
+                torre.rect.x + torre.rect.w / 2,
+                torre.rect.y + 30,
+                f_s,
+                BLANCO
+              );
+            });
+          } else {
+            dibujar_virus(ANCHO / 2, ALTO * 0.32, 15, true);
+            explosiones_boss.forEach((ex) => {
+              ctx.beginPath();
+              ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI * 2);
+              ctx.fillStyle = ex.c;
+              ctx.fill();
+            });
+          }
+        } else if (juego_estado === "VICTORIA_TOTAL") {
+          fuegos_artificiales.forEach((f) => {
+            f.x += f.vx;
+            f.y += f.vy;
+            f.v--;
+            if (f.v > 0) {
+              ctx.fillStyle = f.c;
+              ctx.fillRect(f.x, f.y, 8, 8);
+            }
+          });
+          let r_vt = { x: ANCHO / 2 - 400, y: ALTO / 2 - 200, w: 800, h: 400 };
+          ctxRect(r_vt, NEGRO_MONITOR, ORO_RECOMPENSA, 12, 4);
+          drawTextBorde(
+            "¡VICTORIA ABSOLUTA!",
+            r_vt.x + 400,
+            r_vt.y + 60,
+            f_l,
+            ORO_RECOMPENSA,
+            NEGRO_MONITOR
+          );
+          drawText(
+            "Has recuperado el sistema.",
+            r_vt.x + 400,
+            r_vt.y + 150,
+            f_m,
+            BLANCO
+          );
+          drawText(
+            "¡MODO FLASH DESBLOQUEADO!",
+            r_vt.x + 400,
+            r_vt.y + 220,
+            f_m,
+            AMARILLO_WARN
+          );
+
+          let ry = r_vt.y + r_vt.h - 90;
+          ctxRect(
+            { x: ANCHO / 2 - 260, y: ry, w: 240, h: 55 },
+            "rgb(20,40,60)",
+            CIAN_TERMINAL,
+            6
+          );
+          drawText("MENU PRINCIPAL", ANCHO / 2 - 140, ry + 27, f_m, CIAN_NEON);
+          ctxRect(
+            { x: ANCHO / 2 + 20, y: ry, w: 240, h: 55 },
+            "rgb(50,40,10)",
+            ORO_RECOMPENSA,
+            6
+          );
+          drawText("MODO FLASH", ANCHO / 2 + 140, ry + 27, f_m, ORO_RECOMPENSA);
+        } else if (juego_estado === "FLASH_CORE") {
+          drawTextBorde(
+            "MODO FLASH",
+            ANCHO / 2,
+            ALTO * 0.08,
+            f_l,
+            CIAN_NEON,
+            NEGRO_MONITOR
+          );
+          let cr =
+            tiempo_flash_restante > 20
+              ? VERDE_ALERTA
+              : tiempo_flash_restante > 8
+              ? AMARILLO_WARN
+              : ROJO_ALERTA;
+          drawText(
+            `TIEMPO: ${tiempo_flash_restante.toFixed(1)}s | PREGUNTA: ${
+              indice_flash_actual + 1
+            }/20`,
+            ANCHO / 2,
+            ALTO * 0.16,
+            f_m,
+            cr
+          );
+
+          let r_en = {
+            x: ANCHO * 0.08,
+            y: ALTO * 0.24,
+            w: ANCHO * 0.84,
+            h: ALTO * 0.34,
+          };
+          ctxRect(r_en, NEGRO_MONITOR, CIAN_TERMINAL, 10);
+          let q_txt = preguntas_flash_partida[indice_flash_actual].q;
+          ctx.font = `bold ${f_m}px 'Courier New'`;
+          wrapText(
+            ctx,
+            q_txt,
+            r_en.x + r_en.w / 2,
+            r_en.y + 60,
+            r_en.w - 60,
+            f_m * 1.5,
+            BLANCO
+          );
+
+          ctxRect(rects.flash_v, "rgb(20,35,50)", VERDE_ALERTA, 8);
+          drawText(
+            "A) VERDADERO",
+            rects.flash_v.x + rects.flash_v.w / 2,
+            rects.flash_v.y + rects.flash_v.h / 2,
+            f_m,
+            VERDE_ALERTA
+          );
+          ctxRect(rects.flash_f, "rgb(20,35,50)", ROJO_ALERTA, 8);
+          drawText(
+            "B) FALSO",
+            rects.flash_f.x + rects.flash_f.w / 2,
+            rects.flash_f.y + rects.flash_f.h / 2,
+            f_m,
+            ROJO_ALERTA
+          );
+
+          if (mostrar_explicacion_flash) {
+            let rb = { x: ANCHO / 2 - 340, y: ALTO / 2 - 130, w: 680, h: 260 };
+            ctxRect(rb, "rgb(45,8,12)", ROJO_ALERTA, 12, 4);
+            drawTextBorde(
+              "¡INCORRECTO!",
+              rb.x + 340,
+              rb.y + 40,
+              f_m,
+              ROJO_ALERTA,
+              BLANCO
+            );
+            wrapText(
+              ctx,
+              texto_explicacion_flash,
+              rb.x + 340,
+              rb.y + 110,
+              600,
+              f_s * 1.5,
+              BLANCO
+            );
+            drawText(
+              "Haz clic para continuar...",
+              rb.x + 340,
+              rb.y + 220,
+              f_s,
+              AMARILLO_WARN
+            );
+          }
+        } else if (juego_estado === "FLASH_RESULTADO") {
+          let r_fr = { x: ANCHO / 2 - 380, y: ALTO / 2 - 240, w: 760, h: 480 };
+          ctxRect(r_fr, NEGRO_MONITOR, ORO_RECOMPENSA, 15, 3);
+          let pc = Math.floor((correctas_flash / 20.0) * 100);
+          let c_pc =
+            pc >= 80 ? VERDE_ALERTA : pc >= 50 ? AMARILLO_WARN : ROJO_ALERTA;
+
+          drawTextBorde(
+            "REPORTE MODO FLASH",
+            r_fr.x + 380,
+            r_fr.y + 60,
+            f_l,
+            ORO_RECOMPENSA,
+            NEGRO_MONITOR
+          );
+
+          if (tiempo_flash_restante <= 0) {
+            drawText(
+              "¡TIEMPO AGOTADO!",
+              r_fr.x + 380,
+              r_fr.y + 130,
+              f_m,
+              ROJO_ALERTA
+            );
+            drawText(
+              `Respondiste a tiempo: ${indice_flash_actual} de 20`,
+              r_fr.x + 380,
+              r_fr.y + 180,
+              f_m,
+              BLANCO
+            );
+            drawText(
+              `Aciertos logrados: ${correctas_flash}`,
+              r_fr.x + 380,
+              r_fr.y + 230,
+              f_m,
+              BLANCO
+            );
+            drawTextBorde(
+              `RENDIMIENTO GLOBAL: ${pc}%`,
+              r_fr.x + 380,
+              r_fr.y + 310,
+              f_l,
+              c_pc,
+              NEGRO_MONITOR
+            );
+          } else {
+            drawText(
+              `¡COMPLETADO! Tiempo: ${tiempo_flash_usado.toFixed(1)}s`,
+              r_fr.x + 380,
+              r_fr.y + 130,
+              f_m,
+              VERDE_ALERTA
+            );
+            drawText(
+              `Aciertos: ${correctas_flash} de 20`,
+              r_fr.x + 380,
+              r_fr.y + 190,
+              f_m,
+              BLANCO
+            );
+            drawTextBorde(
+              `RENDIMIENTO: ${pc}%`,
+              r_fr.x + 380,
+              r_fr.y + 270,
+              f_l,
+              c_pc,
+              NEGRO_MONITOR
+            );
+            if (pc === 100)
+              drawText(
+                "¡RENDIMIENTO PERFECTO!",
+                r_fr.x + 380,
+                r_fr.y + 320,
+                f_s,
+                ORO_RECOMPENSA
+              );
+          }
+
+          ctxRect(
+            { x: ANCHO / 2 - 250, y: ALTO * 0.78, w: 230, h: 55 },
+            "rgb(30,50,70)",
+            CIAN_TERMINAL,
+            6
+          );
+          drawText("MENU", ANCHO / 2 - 135, ALTO * 0.78 + 27, f_s, CIAN_NEON);
+          ctxRect(
+            { x: ANCHO / 2 + 20, y: ALTO * 0.78, w: 230, h: 55 },
+            "rgb(30,50,70)",
+            VERDE_ALERTA,
+            6
+          );
+          drawText(
+            "REJUGAR",
+            ANCHO / 2 + 135,
+            ALTO * 0.78 + 27,
+            f_s,
+            VERDE_ALERTA
+          );
+        } else if (juego_estado === "GAME_OVER") {
+          let r_go = {
+            x: ANCHO * 0.08,
+            y: ALTO * 0.3,
+            w: ANCHO * 0.84,
+            h: ALTO * 0.36,
+          };
+          ctxRect(r_go, NEGRO_MONITOR, ROJO_ALERTA, 12, 3);
+          drawText(
+            "SISTEMA BLOQUEADO",
+            r_go.x + r_go.w / 2,
+            r_go.y + 80,
+            f_l,
+            ROJO_ALERTA
+          );
+          ctxRect(
+            { x: ANCHO / 2 - 145, y: ALTO * 0.7, w: 290, h: 55 },
+            null,
+            VERDE_ALERTA,
+            8
+          );
+          drawText(
+            "REINICIAR FASE",
+            ANCHO / 2,
+            ALTO * 0.7 + 27,
+            f_m,
+            VERDE_ALERTA
+          );
+          ctxRect(
+            { x: ANCHO / 2 - 145, y: ALTO * 0.82, w: 290, h: 55 },
+            null,
+            ROJO_ALERTA,
+            8
+          );
+          drawText("SALIR", ANCHO / 2, ALTO * 0.82 + 27, f_m, ROJO_ALERTA);
+        }
+
+        ctx.restore(); // Restore vibration offset
+
+        if (t - tiempo_destello_error < 280) {
+          ctx.fillStyle = "rgba(255,10,25,0.7)";
+          ctx.fillRect(0, 0, ANCHO, ALTO);
+        }
+
+        // --- RENDERIZADO TRANSICIONES (PUERTAS) ---
+        if (
+          [
+            "CERRANDO",
+            "IMPACTO",
+            "ABRIENDO",
+            "MENU",
+            "FASE2_RECOMPENSA",
+            "FASE1_EXPLICACION",
+            "FASE2_EXPLICACION",
+            "FASE3_INTRO",
+            "SISTEMA_REORGANIZANDO",
+            "INSTRUCCIONES",
+          ].includes(juego_estado)
+        ) {
+          ctx.fillStyle = "rgb(15,30,50)";
+          ctx.fillRect(pos_puerta_izq, 0, ANCHO / 2, ALTO);
+          ctx.fillRect(pos_puerta_der, 0, ANCHO / 2, ALTO);
+          if (juego_estado === "SISTEMA_REORGANIZANDO") {
+            let pb = Math.min(1.0, (t - t_hit) / 4000);
+            ctxRect(
+              { x: ANCHO / 2 - 200, y: ALTO / 2 - 20, w: 400, h: 40 },
+              "rgb(25,60,90)",
+              null,
+              6
+            );
+            ctxRect(
+              { x: ANCHO / 2 - 200, y: ALTO / 2 - 20, w: 400 * pb, h: 40 },
+              CIAN_TERMINAL,
+              null,
+              6
+            );
+            drawText(
+              "REORGANIZANDO...",
+              ANCHO / 2,
+              ALTO / 2 - 50,
+              f_m,
+              CIAN_NEON
+            );
+            let fy = Math.floor(t / 4) % ALTO;
+            ctx.strokeStyle = CIAN_NEON;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(ANCHO / 4, fy);
+            ctx.lineTo(ANCHO / 4 + 150, fy);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(ANCHO * 0.75 - 150, ALTO - fy);
+            ctx.lineTo(ANCHO * 0.75, ALTO - fy);
+            ctx.stroke();
+          }
+          if (
+            [
+              "CERRANDO",
+              "IMPACTO",
+              "ABRIENDO",
+              "SISTEMA_REORGANIZANDO",
+            ].includes(juego_estado)
+          ) {
+            ctx.strokeStyle = CIAN_TERMINAL;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(pos_puerta_izq + ANCHO / 2 - 2, 0);
+            ctx.lineTo(pos_puerta_izq + ANCHO / 2 - 2, ALTO);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(pos_puerta_der, 0);
+            ctx.lineTo(pos_puerta_der, ALTO);
+            ctx.stroke();
+          }
+          for (let i = humo.length - 1; i >= 0; i--) {
+            let p = humo[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.r -= 0.4;
+            if (p.r <= 0) humo.splice(i, 1);
+            else {
+              ctx.beginPath();
+              ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+              ctx.fillStyle = "rgb(100,125,140)";
+              ctx.fill();
+            }
+          }
+        }
+
+        scanline_y = (scanline_y + 2) % ALTO;
+        ctx.fillStyle = "rgba(0,230,255,0.08)";
+        ctx.fillRect(0, scanline_y, ANCHO, 2);
+      }
+
+      // --- SUB-RUTINAS DE DIBUJO ---
+      function scrambled(txt, prog, chars = "@#$%") {
+        let r = "";
+        for (let i = 0; i < txt.length; i++)
+          r +=
+            i < prog ? txt[i] : chars[Math.floor(Math.random() * chars.length)];
+        return r;
+      }
+      function checkFase2(opc, t) {
+        if (pregunta_fase2_actual.correcta === opc) {
+          playSound("exito");
+          indice_reto_f2++;
+          if (indice_reto_f2 >= 3) {
+            progreso_matrix_f2 = 0;
+            sub_indice_reto_challenge = 0;
+            juego_estado = "RETO_POPUP";
+            tiempo_emergencia = t;
+            playSound("sirena");
+          } else preparar_fase2();
+        } else {
+          playSound("error");
+          tiempo_destello_error = t;
+          intentos--;
+          feedback_f2_l1 = pregunta_fase2_actual.f_l1;
+          feedback_f2_l2 = pregunta_fase2_actual.f_l2;
+          juego_estado = "FASE2_EXPLICACION";
+        }
+      }
+      function checkFlashNext() {
+        indice_flash_actual++;
+        if (indice_flash_actual >= preguntas_flash_partida.length)
+          juego_estado = "FLASH_RESULTADO";
+      }
+
+      function dibujar_grafica(r) {
+        ctxRect(r, "rgb(5,25,20)", ROJO_ALERTA, 0, 3);
+        let cx = r.x + r.w / 2,
+          cy = r.y + r.h / 2;
+        ctx.strokeStyle = "rgb(30,60,45)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(r.x, cy);
+        ctx.lineTo(r.x + r.w, cy);
+        ctx.moveTo(cx, r.y);
+        ctx.lineTo(cx, r.y + r.h);
+        ctx.stroke();
+
+        let tp = retos_partida[3].t;
+        let pts = [];
+        if (progreso_trazado_grafica < 1.0) progreso_trazado_grafica += 0.02;
+        let lim = (r.w / 2) * progreso_trazado_grafica;
+
+        for (let px = 0; px < r.w; px++) {
+          let dc = px - r.w / 2;
+          if (Math.abs(dc) <= lim) {
+            let x = dc * 0.08,
+              y = 0;
+            if (tp === "SENO") y = Math.sin(x) * 45;
+            else if (tp === "COSENO") y = Math.cos(x) * 45;
+            else if (tp === "LINEAL") y = x * 18;
+            else if (tp === "CONSTANTE") y = 30;
+            else if (tp === "VALOR ABSOLUTO") y = Math.abs(x) * 18;
+            let ly = cy - y;
+            if (ly > r.y && ly < r.y + r.h) pts.push({ x: r.x + px, y: ly });
+          }
+        }
+        if (pts.length > 1) {
+          ctx.beginPath();
+          ctx.strokeStyle = CIAN_NEON;
+          ctx.lineWidth = 4;
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.stroke();
+        }
+      }
+
+      function dibujar_fisicas(r) {
+        ctxRect(r, "rgb(8,14,25)", CIAN_TERMINAL, 8);
+        let py = r.y + r.h - 25;
+        ctx.strokeStyle = "rgb(0,80,100)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(r.x, py);
+        ctx.lineTo(r.x + r.w, py);
+        ctx.stroke();
+        let mw = 65,
+          mh = r.h * 0.65,
+          mx = r.x + 80,
+          my = py - mh;
+        ctxRect({ x: mx, y: my, w: mw, h: mh }, GRIS_MURO, null, 4);
+        let nx = mx + mw - 20,
+          ny = my - 30;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 10, 0, Math.PI * 2);
+        ctx.fillStyle = CIAN_NEON;
+        ctx.fill();
+
+        t_fisica_reto += 0.045;
+        if (t_fisica_reto > 6.5) {
+          t_fisica_reto = 0;
+          progreso_particulas_reto = [];
+        }
+        let px = nx + 38.0 * t_fisica_reto;
+        let pty =
+          ny +
+          -22.0 * t_fisica_reto +
+          0.5 * 14.0 * (t_fisica_reto * t_fisica_reto);
+        if (pty < py && px < r.x + r.w)
+          progreso_particulas_reto.push({ x: px, y: pty });
+        progreso_particulas_reto.forEach((pt) => {
+          ctx.beginPath();
+          ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+
+      function dibujar_virus(cx, cy, tp, dano) {
+        let aw = SPRITE_VIRUS[0].length * tp,
+          ah = SPRITE_VIRUS.length * tp;
+        let sx = cx - aw / 2,
+          sy = cy - ah / 2;
+        for (let r = 0; r < SPRITE_VIRUS.length; r++) {
+          for (let c = 0; c < SPRITE_VIRUS[0].length; c++) {
+            let v = SPRITE_VIRUS[r][c];
+            if (v !== 0) {
+              let px = sx + c * tp,
+                py = sy + r * tp;
+              if (dano)
+                ctx.fillStyle = [BLANCO, ROJO_ALERTA, VIRUS_COLOR][
+                  Math.floor(Math.random() * 3)
+                ];
+              else ctx.fillStyle = v === 1 ? VIRUS_COLOR : ROJO_ALERTA;
+              ctx.fillRect(px, py, tp - 1, tp - 1);
+            }
+          }
+        }
+      }
+
+      function wrapText(context, text, x, y, maxWidth, lineHeight, color) {
+        let words = text.split(" "),
+          line = "";
+        ctx.fillStyle = color;
+        for (let n = 0; n < words.length; n++) {
+          let testLine = line + words[n] + " ",
+            m = context.measureText(testLine);
+          if (m.width > maxWidth && n > 0) {
+            context.fillText(line.trim(), x, y);
+            line = words[n] + " ";
+            y += lineHeight;
+          } else {
+            line = testLine;
+          }
+        }
+        context.fillText(line.trim(), x, y);
+      }
+
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
